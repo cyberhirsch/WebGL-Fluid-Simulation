@@ -1,30 +1,5 @@
-/*
-MIT License
-
-Copyright (c) 2017 Pavel Dobryakov
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
 
 'use strict';
-
-// Mobile promo section
 
 const promoPopup = document.getElementsByClassName('promo')[0];
 const promoPopupClose = document.getElementsByClassName('promo-close')[0];
@@ -55,6 +30,31 @@ googleLink.addEventListener('click', e => {
 
 const canvas = document.getElementsByTagName('canvas')[0];
 resizeCanvas();
+
+const fileInput = document.createElement('input');
+fileInput.type = 'file';
+fileInput.accept = 'image/*';
+document.body.appendChild(fileInput);
+
+fileInput.addEventListener('change', function(event) {
+    const file = event.target.files[0];
+    const reader = new FileReader();
+    
+    reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+            // Optionally, draw the image onto the canvas or use it to influence the simulation
+            const canvas = document.getElementById('yourCanvasId'); // Make sure to replace 'yourCanvasId' with your actual canvas ID
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            
+            // Add any additional logic here to use the image data for the simulation
+        };
+        img.src = e.target.result;
+    };
+    
+    reader.readAsDataURL(file);
+});
 
 let config = {
     SIM_RESOLUTION: 128,
@@ -611,117 +611,10 @@ const displayShaderSource = `
     }
 `;
 
-const bloomPrefilterShader = compileShader(gl.FRAGMENT_SHADER, `
-    precision mediump float;
-    precision mediump sampler2D;
 
-    varying vec2 vUv;
-    uniform sampler2D uTexture;
-    uniform vec3 curve;
-    uniform float threshold;
 
-    void main () {
-        vec3 c = texture2D(uTexture, vUv).rgb;
-        float br = max(c.r, max(c.g, c.b));
-        float rq = clamp(br - curve.x, 0.0, curve.y);
-        rq = curve.z * rq * rq;
-        c *= max(rq, br - threshold) / max(br, 0.0001);
-        gl_FragColor = vec4(c, 0.0);
-    }
-`);
 
-const bloomBlurShader = compileShader(gl.FRAGMENT_SHADER, `
-    precision mediump float;
-    precision mediump sampler2D;
 
-    varying vec2 vL;
-    varying vec2 vR;
-    varying vec2 vT;
-    varying vec2 vB;
-    uniform sampler2D uTexture;
-
-    void main () {
-        vec4 sum = vec4(0.0);
-        sum += texture2D(uTexture, vL);
-        sum += texture2D(uTexture, vR);
-        sum += texture2D(uTexture, vT);
-        sum += texture2D(uTexture, vB);
-        sum *= 0.25;
-        gl_FragColor = sum;
-    }
-`);
-
-const bloomFinalShader = compileShader(gl.FRAGMENT_SHADER, `
-    precision mediump float;
-    precision mediump sampler2D;
-
-    varying vec2 vL;
-    varying vec2 vR;
-    varying vec2 vT;
-    varying vec2 vB;
-    uniform sampler2D uTexture;
-    uniform float intensity;
-
-    void main () {
-        vec4 sum = vec4(0.0);
-        sum += texture2D(uTexture, vL);
-        sum += texture2D(uTexture, vR);
-        sum += texture2D(uTexture, vT);
-        sum += texture2D(uTexture, vB);
-        sum *= 0.25;
-        gl_FragColor = sum * intensity;
-    }
-`);
-
-const sunraysMaskShader = compileShader(gl.FRAGMENT_SHADER, `
-    precision highp float;
-    precision highp sampler2D;
-
-    varying vec2 vUv;
-    uniform sampler2D uTexture;
-
-    void main () {
-        vec4 c = texture2D(uTexture, vUv);
-        float br = max(c.r, max(c.g, c.b));
-        c.a = 1.0 - min(max(br * 20.0, 0.0), 0.8);
-        gl_FragColor = c;
-    }
-`);
-
-const sunraysShader = compileShader(gl.FRAGMENT_SHADER, `
-    precision highp float;
-    precision highp sampler2D;
-
-    varying vec2 vUv;
-    uniform sampler2D uTexture;
-    uniform float weight;
-
-    #define ITERATIONS 16
-
-    void main () {
-        float Density = 0.3;
-        float Decay = 0.95;
-        float Exposure = 0.7;
-
-        vec2 coord = vUv;
-        vec2 dir = vUv - 0.5;
-
-        dir *= 1.0 / float(ITERATIONS) * Density;
-        float illuminationDecay = 1.0;
-
-        float color = texture2D(uTexture, vUv).a;
-
-        for (int i = 0; i < ITERATIONS; i++)
-        {
-            coord -= dir;
-            float col = texture2D(uTexture, coord).a;
-            color += col * illuminationDecay * weight;
-            illuminationDecay *= Decay;
-        }
-
-        gl_FragColor = vec4(color * Exposure, 0.0, 0.0, 1.0);
-    }
-`);
 
 const splatShader = compileShader(gl.FRAGMENT_SHADER, `
     precision highp float;
@@ -1009,38 +902,9 @@ function initFramebuffers () {
     initSunraysFramebuffers();
 }
 
-function initBloomFramebuffers () {
-    let res = getResolution(config.BLOOM_RESOLUTION);
 
-    const texType = ext.halfFloatTexType;
-    const rgba = ext.formatRGBA;
-    const filtering = ext.supportLinearFiltering ? gl.LINEAR : gl.NEAREST;
 
-    bloom = createFBO(res.width, res.height, rgba.internalFormat, rgba.format, texType, filtering);
 
-    bloomFramebuffers.length = 0;
-    for (let i = 0; i < config.BLOOM_ITERATIONS; i++)
-    {
-        let width = res.width >> (i + 1);
-        let height = res.height >> (i + 1);
-
-        if (width < 2 || height < 2) break;
-
-        let fbo = createFBO(width, height, rgba.internalFormat, rgba.format, texType, filtering);
-        bloomFramebuffers.push(fbo);
-    }
-}
-
-function initSunraysFramebuffers () {
-    let res = getResolution(config.SUNRAYS_RESOLUTION);
-
-    const texType = ext.halfFloatTexType;
-    const r = ext.formatR;
-    const filtering = ext.supportLinearFiltering ? gl.LINEAR : gl.NEAREST;
-
-    sunrays     = createFBO(res.width, res.height, r.internalFormat, r.format, texType, filtering);
-    sunraysTemp = createFBO(res.width, res.height, r.internalFormat, r.format, texType, filtering);
-}
 
 function createFBO (w, h, internalFormat, format, type, param) {
     gl.activeTexture(gl.TEXTURE0);
@@ -1347,63 +1211,7 @@ function drawDisplay (target) {
     blit(target);
 }
 
-function applyBloom (source, destination) {
-    if (bloomFramebuffers.length < 2)
-        return;
 
-    let last = destination;
-
-    gl.disable(gl.BLEND);
-    bloomPrefilterProgram.bind();
-    let knee = config.BLOOM_THRESHOLD * config.BLOOM_SOFT_KNEE + 0.0001;
-    let curve0 = config.BLOOM_THRESHOLD - knee;
-    let curve1 = knee * 2;
-    let curve2 = 0.25 / knee;
-    gl.uniform3f(bloomPrefilterProgram.uniforms.curve, curve0, curve1, curve2);
-    gl.uniform1f(bloomPrefilterProgram.uniforms.threshold, config.BLOOM_THRESHOLD);
-    gl.uniform1i(bloomPrefilterProgram.uniforms.uTexture, source.attach(0));
-    blit(last);
-
-    bloomBlurProgram.bind();
-    for (let i = 0; i < bloomFramebuffers.length; i++) {
-        let dest = bloomFramebuffers[i];
-        gl.uniform2f(bloomBlurProgram.uniforms.texelSize, last.texelSizeX, last.texelSizeY);
-        gl.uniform1i(bloomBlurProgram.uniforms.uTexture, last.attach(0));
-        blit(dest);
-        last = dest;
-    }
-
-    gl.blendFunc(gl.ONE, gl.ONE);
-    gl.enable(gl.BLEND);
-
-    for (let i = bloomFramebuffers.length - 2; i >= 0; i--) {
-        let baseTex = bloomFramebuffers[i];
-        gl.uniform2f(bloomBlurProgram.uniforms.texelSize, last.texelSizeX, last.texelSizeY);
-        gl.uniform1i(bloomBlurProgram.uniforms.uTexture, last.attach(0));
-        gl.viewport(0, 0, baseTex.width, baseTex.height);
-        blit(baseTex);
-        last = baseTex;
-    }
-
-    gl.disable(gl.BLEND);
-    bloomFinalProgram.bind();
-    gl.uniform2f(bloomFinalProgram.uniforms.texelSize, last.texelSizeX, last.texelSizeY);
-    gl.uniform1i(bloomFinalProgram.uniforms.uTexture, last.attach(0));
-    gl.uniform1f(bloomFinalProgram.uniforms.intensity, config.BLOOM_INTENSITY);
-    blit(destination);
-}
-
-function applySunrays (source, mask, destination) {
-    gl.disable(gl.BLEND);
-    sunraysMaskProgram.bind();
-    gl.uniform1i(sunraysMaskProgram.uniforms.uTexture, source.attach(0));
-    blit(mask);
-
-    sunraysProgram.bind();
-    gl.uniform1f(sunraysProgram.uniforms.weight, config.SUNRAYS_WEIGHT);
-    gl.uniform1i(sunraysProgram.uniforms.uTexture, mask.attach(0));
-    blit(destination);
-}
 
 function blur (target, temp, iterations) {
     blurProgram.bind();
@@ -1461,94 +1269,7 @@ function correctRadius (radius) {
     return radius;
 }
 
-canvas.addEventListener('mousedown', e => {
-    let posX = scaleByPixelRatio(e.offsetX);
-    let posY = scaleByPixelRatio(e.offsetY);
-    let pointer = pointers.find(p => p.id == -1);
-    if (pointer == null)
-        pointer = new pointerPrototype();
-    updatePointerDownData(pointer, -1, posX, posY);
-});
 
-canvas.addEventListener('mousemove', e => {
-    let pointer = pointers[0];
-    if (!pointer.down) return;
-    let posX = scaleByPixelRatio(e.offsetX);
-    let posY = scaleByPixelRatio(e.offsetY);
-    updatePointerMoveData(pointer, posX, posY);
-});
-
-window.addEventListener('mouseup', () => {
-    updatePointerUpData(pointers[0]);
-});
-
-canvas.addEventListener('touchstart', e => {
-    e.preventDefault();
-    const touches = e.targetTouches;
-    while (touches.length >= pointers.length)
-        pointers.push(new pointerPrototype());
-    for (let i = 0; i < touches.length; i++) {
-        let posX = scaleByPixelRatio(touches[i].pageX);
-        let posY = scaleByPixelRatio(touches[i].pageY);
-        updatePointerDownData(pointers[i + 1], touches[i].identifier, posX, posY);
-    }
-});
-
-canvas.addEventListener('touchmove', e => {
-    e.preventDefault();
-    const touches = e.targetTouches;
-    for (let i = 0; i < touches.length; i++) {
-        let pointer = pointers[i + 1];
-        if (!pointer.down) continue;
-        let posX = scaleByPixelRatio(touches[i].pageX);
-        let posY = scaleByPixelRatio(touches[i].pageY);
-        updatePointerMoveData(pointer, posX, posY);
-    }
-}, false);
-
-window.addEventListener('touchend', e => {
-    const touches = e.changedTouches;
-    for (let i = 0; i < touches.length; i++)
-    {
-        let pointer = pointers.find(p => p.id == touches[i].identifier);
-        if (pointer == null) continue;
-        updatePointerUpData(pointer);
-    }
-});
-
-window.addEventListener('keydown', e => {
-    if (e.code === 'KeyP')
-        config.PAUSED = !config.PAUSED;
-    if (e.key === ' ')
-        splatStack.push(parseInt(Math.random() * 20) + 5);
-});
-
-function updatePointerDownData (pointer, id, posX, posY) {
-    pointer.id = id;
-    pointer.down = true;
-    pointer.moved = false;
-    pointer.texcoordX = posX / canvas.width;
-    pointer.texcoordY = 1.0 - posY / canvas.height;
-    pointer.prevTexcoordX = pointer.texcoordX;
-    pointer.prevTexcoordY = pointer.texcoordY;
-    pointer.deltaX = 0;
-    pointer.deltaY = 0;
-    pointer.color = generateColor();
-}
-
-function updatePointerMoveData (pointer, posX, posY) {
-    pointer.prevTexcoordX = pointer.texcoordX;
-    pointer.prevTexcoordY = pointer.texcoordY;
-    pointer.texcoordX = posX / canvas.width;
-    pointer.texcoordY = 1.0 - posY / canvas.height;
-    pointer.deltaX = correctDeltaX(pointer.texcoordX - pointer.prevTexcoordX);
-    pointer.deltaY = correctDeltaY(pointer.texcoordY - pointer.prevTexcoordY);
-    pointer.moved = Math.abs(pointer.deltaX) > 0 || Math.abs(pointer.deltaY) > 0;
-}
-
-function updatePointerUpData (pointer) {
-    pointer.down = false;
-}
 
 function correctDeltaX (delta) {
     let aspectRatio = canvas.width / canvas.height;
